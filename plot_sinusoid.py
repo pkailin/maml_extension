@@ -10,8 +10,8 @@ from torch.utils.data import DataLoader
 
 def test_sinusoid(model, task_labels_present, basic_maml, path, device="cpu"):
     # Initialize optimizer and loss function
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
     criterion = nn.MSELoss()
+    inner_lr = 0.001
 
     # Create test dataset with one task but more points for visualization
     test_dataset = SinusoidDataset(num_tasks=1, points_per_task=10)  
@@ -28,27 +28,34 @@ def test_sinusoid(model, task_labels_present, basic_maml, path, device="cpu"):
     model.train()
     # Quick adaptation (inner loop)
     for epoch in range(10):
-        optimizer.zero_grad()
-        if task_labels_present:
+
+        if basic_maml == True: 
+            y_pred = model(x_train)
+        elif task_labels_present:
             y_pred = model(x_train, y_train, use_true_task_labels=False, true_task_labels=None)
         else:
-            y_pred = model(x_train, y_train)  # basic maml
+            y_pred = model(x_train, y_train)
 
         loss = criterion(y_pred.view(-1), y_train.view(-1))
-        loss.backward()
-        optimizer.step()
+        
+        # Compute gradients manually
+        grads = torch.autograd.grad(loss, model.parameters(), create_graph=True, allow_unused=True)
+
+        # Perform manual gradient descent update
+        with torch.no_grad():
+            for param, grad in zip(model.parameters(), grads):
+                param -= inner_lr * grad  # Manual update
     
     model.eval()
 
     # Generate smooth x values for plotting
     x_plot = torch.linspace(-5, 5, 200).reshape(-1, 1).to(device)
-    empty_tensor = torch.zeros_like(x_plot)
 
     # Get model predictions
     with torch.no_grad():
 
         if basic_maml == True: 
-            y_pred = model(x_plot, empty_tensor)
+            y_pred = model(x_plot)
         
         else: 
             features_train = model.feature_extractor(x_train)
@@ -57,13 +64,13 @@ def test_sinusoid(model, task_labels_present, basic_maml, path, device="cpu"):
             if task_labels_present == True: 
                 # getting task label 
                 task_labels = model.task_label_generator(features_train, y_train)
-                task_labels = task_labels.repeat(len(x_plot), 1) # assign the same task label to all points 
+                task_labels = task_labels.repeat(10, 1) # assign the same task label to all points 
 
                 # getting weights using training data 
-                weights = model.weights_generator(features_plot, empty_tensor, task_labels)
+                weights = model.weights_generator(features_train, y_train, task_labels)
             
             else: 
-                weights = model.weights_generator(features_plot, empty_tensor) 
+                weights = model.weights_generator(features_train, y_train) 
             
             # Make predictions using linear combination of basis functions
             y_pred = torch.matmul(features_plot, weights)
@@ -102,13 +109,18 @@ model = Regressor(input_dim=1).to(device)  # Note: input_dim=1 for sinusoid
 path = "model_BasicMAML_Sinusoid.pth"
 model.load_state_dict(torch.load(path))
 test_sinusoid(model, task_labels_present=False, basic_maml=True, path=path)
+k_shot_test(model, sinusoid=True, basic_maml=True, device="cpu", task_labels_present=False)
 
+'''
 model = FewShotRegressor(input_dim=1, task_label_dim=2)
 path = "model_TaskLabel_Sinusoid.pth"
 model.load_state_dict(torch.load(path))
 test_sinusoid(model, task_labels_present=True, basic_maml=False, path=path)
+k_shot_test(model, sinusoid=True, basic_maml=False, device="cpu", task_labels_present=True)
 
 model = FewShotRegressor_NoTaskLabel(input_dim=1)
 path = "model_NoTaskLabel_Sinusoid.pth"
 model.load_state_dict(torch.load(path))
 test_sinusoid(model, task_labels_present=False, basic_maml=False, path=path)
+k_shot_test(model, sinusoid=True, basic_maml=False, device="cpu", task_labels_present=False)
+'''

@@ -10,7 +10,10 @@ import torch
 import copy 
 from data_generator import *
 
-def k_shot_test(model, optimizer, criterion, sinusoid, basic_maml, device="cpu", task_labels_present=True):
+def k_shot_test(model, sinusoid, basic_maml, device="cpu", task_labels_present=True):
+
+    criterion = nn.MSELoss()
+
     # Store initial model state
     original_state = copy.deepcopy(model.state_dict())
     losses_per_step = [[] for _ in range(11)]  # 0-10 steps (including initial)
@@ -18,7 +21,8 @@ def k_shot_test(model, optimizer, criterion, sinusoid, basic_maml, device="cpu",
     for t in range(600):  # Loop over 600 different tasks
         # Reset model to initial state
         model.load_state_dict(original_state)
-        
+        model.train()
+
         # Generate datapoints for one task
         if sinusoid == False:
             test_dataset = GaussianDataset(num_tasks=1, points_per_task=20)
@@ -35,23 +39,19 @@ def k_shot_test(model, optimizer, criterion, sinusoid, basic_maml, device="cpu",
         # Compute initial loss (before adaptation)
         with torch.no_grad():
             if basic_maml == True:
-                y_pred = model(x_test, y_test)
-            else:
+                y_pred = model(x_test)
+            else: 
                 features_train = model.feature_extractor(x_train)
+                features_test = model.feature_extractor(x_test)
                 
                 if task_labels_present == True: 
-                    # getting task label 
                     task_labels = model.task_label_generator(features_train, y_train)
-                    task_labels = task_labels.repeat(10, 1) # assign the same task label to all 10 points in data 
-
-                    # getting weights using training data 
+                    task_labels = task_labels.repeat(10, 1) 
+                    # get weights 
                     weights = model.weights_generator(features_train, y_train, task_labels)
-                
                 else: 
-                    weights = model.weights_generator(features_train, y_train) 
+                    weights = model.weights_generator(features_train, y_train)
 
-                features_test = model.feature_extractor(x_test)
-                # Make predictions using linear combination of basis functions
                 y_pred = torch.matmul(features_test, weights)
             
             initial_loss = criterion(y_pred.view(-1), y_test.view(-1))
@@ -59,39 +59,44 @@ def k_shot_test(model, optimizer, criterion, sinusoid, basic_maml, device="cpu",
         
         # Adaptation steps
         for step in range(10):
-            optimizer.zero_grad()
-            
+
             # Forward pass on training set
-            if task_labels_present:
+            if basic_maml == True: 
+                y_pred = model(x_train)
+            elif task_labels_present:
                 y_pred = model(x_train, y_train, use_true_task_labels=False, true_task_labels=None)
             else:
                 y_pred = model(x_train, y_train)
             
             # Compute loss and adapt
             loss = criterion(y_pred.view(-1), y_train.view(-1))
-            loss.backward()
-            optimizer.step()
+            
+            # Compute gradients manually
+            grads = torch.autograd.grad(loss, model.parameters(), create_graph=True, allow_unused=True)
+
+            # Perform manual gradient descent update with lr = 0.001
+            lr = 0.001
+            with torch.no_grad():  # Ensure we don't track gradients while updating weights
+                for param, grad in zip(model.parameters(), grads):
+                    if grad is not None:  # Ensure grad is not None before updating
+                        param -= lr * grad
             
             # Evaluate on test set after adaptation
             with torch.no_grad():
                 if basic_maml == True:
-                    y_pred = model(x_test, y_test)
-                else:
+                    y_pred = model(x_test)
+                else: 
                     features_train = model.feature_extractor(x_train)
+                    features_test = model.feature_extractor(x_test)
                     
                     if task_labels_present == True: 
-                        # getting task label 
                         task_labels = model.task_label_generator(features_train, y_train)
-                        task_labels = task_labels.repeat(10, 1) # assign the same task label to all 10 points in data 
-
-                        # getting weights using training data 
+                        task_labels = task_labels.repeat(10, 1) 
+                        # get weights 
                         weights = model.weights_generator(features_train, y_train, task_labels)
-                    
                     else: 
-                        weights = model.weights_generator(features_train, y_train) 
+                        weights = model.weights_generator(features_train, y_train)
 
-                    features_test = model.feature_extractor(x_test)
-                    # Make predictions using linear combination of basis functions
                     y_pred = torch.matmul(features_test, weights)
                     
                 test_loss = criterion(y_pred.view(-1), y_test.view(-1))

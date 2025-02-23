@@ -77,7 +77,7 @@ class WeightsGenerator(nn.Module):
         
         Args:
             features: Input features of shape [batch_size, feature_dim]
-            labels: Input labels of shape [batch_size, 1]
+            labels: Input labels (output values) of shape [batch_size, 1]
             task_labels: Task labels of shape [batch_size, task_label_dim]
             
         Returns:
@@ -245,7 +245,7 @@ class Regressor(nn.Module):
         self.fc2 = nn.Linear(40, 40)         # Second hidden layer
         self.fc_out = nn.Linear(40, 1)       # Output layer
 
-    def forward(self, x_train, y_train):
+    def forward(self, x_train):
         x = F.relu(self.fc1(x_train))  # First hidden layer with ReLU
         x = F.relu(self.fc2(x))  # Second hidden layer with ReLU
         x = self.fc_out(x)       # Output layer (regression task)
